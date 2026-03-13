@@ -1,0 +1,29 @@
+/__pycache__
+
+.env
+
+/myenv
+
+/.venv
+
+/venv
+
+# Byte-compiled files
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Logs
+*.log
+*.txt
+
+# IDE settings
+.vscode/
+.idea/
+*.iml
