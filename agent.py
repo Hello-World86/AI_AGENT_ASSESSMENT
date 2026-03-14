@@ -1,15 +1,16 @@
 import os
 import json
 import re 
-from typing import Any 
+from typing import Any, List, Dict, Optional
 
 from tools import get_order_details, get_customer_profile
 from rag import retrieve_policy
 from model import get_model
 
 TOOL_REGISTRY = {
-    "get_oder_details": get_order_details,
-    "get_customer_profile": get_customer_profile
+    "get_order_details": get_order_details,
+    "get_customer_profile": get_customer_profile,
+    "retrieve_policy": retrieve_policy
 }
 
 TOOL_DEFINITIONS = [
@@ -27,12 +28,12 @@ TOOL_DEFINITIONS = [
             "properties":{
                 "order_id":{
                     "type":"string",
-                    "description": "The order ID mentioned by the user (e.g., '2022' )."
+                    "description": "The order ID mentioned by the user (e.g., '8909' )."
                 }
             },
             "required": ["order_id"]
-        },
-    },
+        }
+    }
 },
     {
         "type": "function",
@@ -76,175 +77,146 @@ TOOL_DEFINITIONS = [
                  }
              },
              "required":["query"]
-         }
-     }
+            }
+        }
     }
 ]
+# Keywords to detect policy-related queries
+POLICY_KEYWORDS = [
+    "policy", "return", "refund", "compensation", "delay", "damage",
+    "eligibility", "return window", "refund policy", "delay compensation",
+    "damage claim", "eligible for return", "eligible for refund","eligible for compensation",
+    "return policy", "refund eligibility", "compensation eligibility",
+    "based on the policy", "according to the policy", "what is the policy for", "what's the policy for",
+    "can I return", "can I get a refund", "can I get compensation",
+    "how long is the return window", "what is the return window"
+]
+
 #system prompt for the agent(master prompt)
 PROMPT = """
 You are a concise conversational AI agent that answers customers queries.
 Your job is to answer customer questions about orders, delivery status and company policies.
 You have access to tools that allow you to retrieve structured data from a CRM tool and retrieve company policies from a RAG.
-FOllow these rules strictly. Provide answer in plain facts and no elaborations.
+Follow these rules strictly. Provide answer in plain facts and no elaborations.
 
 You have access to the following tools:
 
+Tool access:
 1. get_order_details
-Use this tool whenever theh user references an order number(e.g. "Order #3031", "#3031","order 3031").
-
-This tool returns:
-- order id
-- customer type(VIP or Standard)
-- order status
-- number of days since delivery 
-
 2. get_customer_profile
-Use this tool when you need to know the customer type (VIP or Standard) to determine eligibility for certain policies or benefits. 
-This tool returns:
-- customer type (VIP or Standard)   
-
 3. retrieve_policy
-Use this tool when the user asks about policies such as:
-- return window
-- refund policy
-- delay compensation
-- damaged items
 
 Always follow this reasoning approach:
 Step 1: Understand the user's question.
 Step 2: Determine whether you need to retrieve:
-- structured data (use get_order_details)
+- structured data (use get_order_details/get_customer_profile),
 - policy information(use retrieve_policy)
 - or both.
 Step 3: If an order number is mentioned, call get_order_details first.
-Step 4: If the question involves return eligibility or refunds, retrieve the relevant policy using retrieve_policy.
-Step 5: Combine the information from the order data and policy to produce a clear answer.
+Step 4: If the question mentions customer type or you need to determine eligibility for policies, call get_customer_profile with the customer type from the order details.
+Step 5: If the question involves return eligibility or refunds, retrieve the relevant policy using retrieve_policy.
+Step 6: Combine the information from the order data and policy to produce a clear answer.
 
 IMPORTANT RULES
 Never guess order information.
 Always use tools when order data is required. 
-Donot guess or invent policies.
+Do not guess or invent policies.
 
 If the user asks about the return eligibility, you must check the policy rules only.
 """
-POLICY_KEYWORDS = [
-    "policy", "return", "refund", "compensation", "delay", "damage", 
-    "eligibility", "return window", "refund policy", "delay compensation",
-    "damage claim", "eligible for return", "eligible for refund","eligible for compensation",
-    "return policy", "refund eligibility", "compensation eligibility",
-    "based on the policy", "according to the policy", "what is the policy for", "what's the policy for",
-    "can I return", "can I get a refund", "can I get compensation", "how long is the return window", "what is the return window",
-]
 
 def _needs_policy(query:str)->bool:
     """"Determine if the user's query is related to company policies based on keyword matching."""
     query_lower = query.lower()
     return any(keyword in query_lower for keyword in POLICY_KEYWORDS)
 
-def _run_tool(tool_name:str, parameters:dict)->Any:
-    """Execute the specified tool with the given parameters."""
-    if tool_name == "retrieve_policy":
-        result = retrieve_policy(**tool_input)
-    elif tool_name in TOOL_REGISTRY:
-        result = TOOL_REGISTRY[tool_name](**tool_input)
-    else:
-        result = {"error": f"Unknown tool: {tool_name}"}
-    return json.dumps(result, indent=2)
+def _run_tool(tool_name:str, parameters:dict)-> dict:
+    """Execute a tool dynamically."""
+    if tool_name in TOOL_REGISTRY:
+        return TOOL_REGISTRY[tool_name](**parameters)
+    return {"error": f"Unknown tool: {tool_name}"}
 
 def run_agent(
-        query:str,
-        max_iterations:int = 15,
-        chat_history:list = [dict]| None = None,
-        )->dict:
-    """Main function for processing user queries and generating responses using tools."""
-    llm = get_llm()
-
-    steps: list[dict]= []
-    has_order_number = re.search(r"#\s*(\d+)", query) or re.search(r"order\s+.*?(\d{4,})", query, re.IGNORECASE)
+        query: str,
+        max_iterations: int = 10,
+        chat_history: Optional[List[Dict[str, str]]] = None
+) -> dict:
    
-   messages = [{"role": "system", "content": PROMPT}]
+    """Main agent function for processing user queries and generating responses using tools."""
+    llm = get_model()
+    steps: list[dict] = []
+
+    has_order_number = re.search(r"#\s*(\d+)", query) or re.search(r"order\s+.*?(\d{4,})", query, re.IGNORECASE)
+    messages: List[Dict[str, str]] = [{"role": "system", "content": PROMPT}]
 
     if chat_history:
-        messeges.extend(chat_history)
-        messeges.append({"role": "user", "content": query})
+        messages.extend(chat_history)
+        messages.append({"role": "user", "content": query})
+        
+    iteration = 0
+    order_data, profile_data, policy_data = None, None, None
 
-    if has_order_number:
-        order_id = has_order_number.group(1)
-        # Step 1: Call get_order_details tool when an order number is mentioned
-        order_data = get_order_details(order_id)
-        steps.append({
-            "step": 1,
-            "tool": "get_order_details",
-            "input": {"order_id": order_id},
-            "output": order_data
-        })
+    while iteration < max_iterations:
+        iteration += 1
 
-        if "error" not in order_data and _needs_policy(query):
-            # Step 2: If the question is about policies, call retrieve_policy with relevant query
-            policy_query = f"{order_data.get('customer_type', '')} return policy"
-            policy_data = retrieve_policy(f"{policy_query} return window")
+        # Step 1: Retrieve order if mentioned
+        if has_order_number and order_data is None:
+            order_id = has_order_number.group(1)
+            order_data = _run_tool("get_order_details", {"order_id": order_id})
             steps.append({
-                "step": 2,
+                "step": len(steps)+1,
+                "tool": "get_order_details",
+                "input": {"order_id": order_id},
+                "output": order_data
+            })
+
+            # Fetch customer profile if order succeeded
+            if "error" not in order_data:
+                customer_type = order_data.get("customer_type")
+                profile_data = _run_tool("get_customer_profile", {"customer_type": customer_type})
+                steps.append({
+                    "step": len(steps)+1,
+                    "tool": "get_customer_profile",
+                    "input": {"customer_type": customer_type},
+                    "output": profile_data
+                })
+
+        # Step 2: Retrieve policy if relevant
+        if _needs_policy(query) and policy_data is None:
+            policy_query = query
+            if order_data and "customer_type" in order_data:
+                policy_query = f"{order_data['customer_type']} return policy"
+            policy_data = _run_tool("retrieve_policy", {"query": policy_query})
+            steps.append({
+                "step": len(steps)+1,
                 "tool": "retrieve_policy",
-                "input": {"query":  f"{policy_query} return window"},
+                "input": {"query": policy_query},
                 "output": policy_data
             })
-            messeges.append({
-                "role": "user", "content":(
-                   f"{query}\n\n"
-                    f"Tool Results:\n"
-                    f"1. Order Data: {json.dumps(order_data, indent=2)}\n"
-                    f"2. Policy: {policy_data.get('context', 'No policy found')}\n\n"
-                    f"Answer the user's question based on the above information. Provide a concise and factual response without elaboration."
-                ),
-            })
-            elif "error" not in order_data:
-            messeges.append({
-                    "role": "user", "content":(
-                        f"{query}\n\n"
-                        f"Tool Results:\n"
-                        f"1. Order Data: {json.dumps(order_data, indent=2)}\n\n"
-                        f"Answer the user's question based on the above information. Provide a concise and factual response without elaboration."
-                    ),
-                })
-            else:
-            # If no order number is mentioned but the query is policy-related, call retrieve_policy directly
-            messeges.append({
-                "role": "user", "content":(
-                    f"{query}\n\n"
-                    f"Tool Results:\n"
-                    f"{json.dumps(policy_data, indent=2)}\n\n"
-                    f"1. Policy: {policy_data.get('context', 'No policy found')}\n\n"
-                    f"Respond that the order information is not available."
-                ),
-            })
-    elif _needs_policy(query):
-        policy_data = retrieve_policy(query)
-        steps.append({
-            "step": 1,
-            "tool": "retrieve_policy",
-            "input": {"query": query},
-            "output": policy_data
-        })
-        messeges.append({
-            "role": "user", "content":(
-                f"{query}\n\n"
-                f"Tool Results:\n"
-                f"1. Policy: {policy_data.get('context', 'No policy found')}\n\n"
-                f"Answer the user's question based on the above information. Provide a concise and factual response without elaboration."
-            ),
-        })
-    else:
-    # For queries that don't mention an order number or policy, respond directly without calling tools
-        messeges.append({
-            "role": "user", "content": query,
-        })  
 
-        #get response from the model llm
-    response = llm.invoke(messeges)
-    answer = response.content
+        # Step 3: Prepare LLM input with tool results
+        tool_results_summary = ""
+        if order_data:
+            tool_results_summary += f"Order Data:\n{json.dumps(order_data, indent=2)}\n"
+        if profile_data:
+            tool_results_summary += f"Customer Profile:\n{json.dumps(profile_data, indent=2)}\n"
+        if policy_data:
+            tool_results_summary += f"Policy:\n{policy_data.get('context','No policy found')}\n"
+
+        messages.append({
+            "role": "user",
+            "content": f"{query}\n\nTool Results:\n{tool_results_summary}\nAnswer concisely based on the above information."
+        })
+
+        # Get LLM response
+        response = llm.invoke(messages)
+        answer = response.content
+
+        # Stop loop for now; replace later with tool-calling check
+        break
+
     return {
         "answer": answer,
         "steps": steps,
-        "iterations": len(steps) if steps else 1,
+        "iterations": iteration
     }
