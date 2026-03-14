@@ -12,7 +12,8 @@ orders = {
         "order_id": 9910,
         "customer_type": "Standard",
         "status": "Processing",
-        "days_since_delivery": 2
+        "days_since_delivery": None,
+        "processing_time": 2,
     }
 }
 
