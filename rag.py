@@ -1,10 +1,20 @@
-policy_text = """
-Standard customers have a 30-day return window and get a $20 credit for delays.
-VIP customers have a 60-day return window and get full refunds for delays or damage.
-"""
-
-def retrieve_policy(customer_type):
-    if customer_type == "VIP":
-        return "VIP customers have a 60-day return window and get full refunds."
-    else:
-        return "Standard customers have a 30-day return window and get $20 credit."
+POLICY_DOCUMENTS = [
+    {
+        "id": "standard_return_policy",
+        "content": (
+            "Standard customers have a 30-day return window and the return window begins from the delivery date. "
+            "If a Standard customer's order gets delayed, they will receive a $20 credit as compensation. "
+            
+        ),
+        "metadata": {"category": "return_policy", "tier": "Standard"},
+    },
+    {
+        "id": "vip_return_policy",
+        "content": (
+            "VIP customers have a 60-day return window. "
+            "If a VIP customer's order is delayed or damaged by any means, they will receive a full refund as compensation. "
+            "The return window for VIP customers also begins from the delivery date."
+        ),
+        "metadata": {"category": "return_policy", "tier": "VIP"},
+    },
+]
