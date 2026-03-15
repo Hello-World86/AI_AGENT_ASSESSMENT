@@ -8,7 +8,7 @@
 
 /venv
 
-# Byte-compiled files
+# The Byte-compiled files
 *.pyc
 *.pyo
 *.pyd
