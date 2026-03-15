@@ -21,7 +21,6 @@ dist/
 
 # Logs
 *.log
-*.txt
 
 # IDE settings
 .vscode/
