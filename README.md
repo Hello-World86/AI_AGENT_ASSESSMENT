@@ -37,4 +37,51 @@ d. Finally, I would add a "re-ranking" step using a cross-encoder model. After r
 3. If this API served hundreds of users at once, what bottlenecks exist and how would you fix them?
 
 Solution:
+If this API had to serve hundreds of users at the same time, there are a few potential bottlenecks in the current design that need to be addressed.
 
+1. Synchronous API Endpoints:
+Currently, the FastAPI endpoints are written using synchronous "def" functions, which block the event loop while processing requests.
+
+Fix: 
+I would convert them to "async def" endpoints and make the GEMINI API calls asynchronous so that the server can handle multiple requests concurrently.
+
+2. Slow LLM API CALLS:
+Here, each request waits for the GEMINI response, which can take around 1-3 seconds.
+
+Fix:
+To improve this, I would:
+i. Use an asynchronous client for API calls,
+ii. Implement request queuing to manage multiple incoming requests,
+iii. Add caching for repeated queries so that the system doesnot need to call the model again and again unnecessarily.
+
+3. Single Worker Process:
+Currently, the API runs with one Uvicorn worker, so that a single process is responsible for handling all incoming requests. If many users send requests simultaneously, they will have to wait in a queue until the worker finishes processing earlier requests. Since the worker processes requests sequentially (especially with blocking operations like LLM calls), users may experience delays in getting responses. As a result, the system will not scale well as traffic increases because even if the machine has multiple CPU cores, only one core is effectively being used.
+
+Fix:
+Instead of starting the server with one worker, I would start it with multiple workers so that several processes can handle requests at the same time. For eg: uvicorn main:app --workers 4. This allows four separate processes to handle requests concurrently.
+Instead of starting the server with one worker, I would start it with multiple workers so that several processes can handle requests at the same time. For eg: gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app
+
+4. No Caching Mechanism:
+Since there is no cache memory, every request, even if it’s identical to other user's query request, needs to be recomputed everytime from scratch which as a result can increase the latency, load on the server and API as well as lead to inefficient resource usage.
+
+Fix:
+To fix this, I would introduce Redis caching to store:
+i.L LM responses, and 
+ii. Tool execution results
+This would significantly reduce redundant computation and improve response times.
+
+5. Vector Search Computed at Startup:
+Right now, every time my API restarts, it recomputes the TF-IDF vectors (or embeddings) for the documents. This is inefficient because not only it slows down the startup of the API but also, if the dataset is large, it wastes CPU cycles unnecessarily.
+
+Fix:
+I would pre-compute embeddings for all documents and persist them in a proper vector database like FAISS, Milvus, or Weaviate. This way, the API can just load the precomputed vectors, making searches almost instant and reducing startup time drastically. For updates, I’d implement a dynamic update mechanism that adds new embeddings without recomputing everything.
+
+6. No Rate Limiting:
+Without rate limiting, my API is exposed to sudden spikes in traffic that could overwhelm the server. And,the external API services like Gemini being hit too frequently, possibly can exceed the quota. Not only this much, there is possibility of potential abuse or DDoS attacks as well.
+
+Fix:
+i. I would add rate-limiting middleware (for FastAPI, something like slowapi) to control how many requests a user or API key can make per minute,
+ii. I’d also implement API key authentication, so I can track and control usage per client,
+iii. Finally, for more advanced control, I could combine rate limiting with caching, so repeated identical queries don’t even count against the limit.
+
+So, in this way, I would fix the bottlenecks that would exist if this API was to serve hundreds of user's at a time.  
