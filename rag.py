@@ -1,20 +1,29 @@
-POLICY_DOCUMENTS = [
-    {
-        "id": "standard_return_policy",
-        "content": (
-            "Standard customers have a 30-day return window and the return window begins from the delivery date. "
-            "If a Standard customer's order gets delayed, they will receive a $20 credit as compensation. "
-            
-        ),
-        "metadata": {"category": "return_policy", "tier": "Standard"},
-    },
-    {
-        "id": "vip_return_policy",
-        "content": (
-            "VIP customers have a 60-day return window. "
-            "If a VIP customer's order is delayed or damaged by any means, they will receive a full refund as compensation. "
-            "The return window for VIP customers also begins from the delivery date."
-        ),
-        "metadata": {"category": "return_policy", "tier": "VIP"},
-    },
-]
+# Here, we perform policy retrieval using vector store search
+
+import logging
+from vector_store import search
+
+logger = logging.getLogger(__name__)
+
+
+def retrieve_policy(query: str) -> dict:
+    """Retrieve relevant policies based on the query."""
+    try:
+        if not query or not isinstance(query, str):
+            logger.warning("Invalid query provided to retrieve_policy")
+            return {"error": "Query must be a non-empty string"}
+
+        logger.debug(f"Retrieving policy for query: {query}")
+
+        results = search(query, k=3)
+
+        if "error" in results:
+            logger.error(f"Error in search results: {results['error']}")
+            return {"error": results["error"]}
+
+        logger.info(f"Policy retrieval successful for query: {query}")
+        return results
+
+    except Exception as e:
+        logger.error(f"Error retrieving policy: {str(e)}", exc_info=True)
+        return {"error": f"Error retrieving policy: {str(e)}"}
