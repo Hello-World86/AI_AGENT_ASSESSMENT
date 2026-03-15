@@ -1,24 +1,21 @@
-from sentence_transformers import SentenceTransformer
-import faiss
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from rag import POLICY_DOCUMENTS
 import numpy as np
 
-documents = [
-"Standard customers have a 30-day return window and get a $20 credit for delays.",
-"VIP customers have a 60-day return window and get full refunds for delays or damage."
-]
+#Initialize vectorizer and compute embeddings for policy documents
+vectorizer = TfidfVectorizer(max_features=500, stop_words='english')
 
-model = SentenceTransformer("all-MiniLM-L6-v2")
+#Convert policy documents into a TF-IDF vectors
+policy_texts = [doc["content"] for doc in POLICY_DOCUMENTS]
+policy_vectors = vectorizer.fit_transform(policy_texts)
 
-embeddings = model.encode(documents)
-
-index = faiss.IndexFlatL2(embeddings.shape[1])
-index.add(np.array(embeddings))
-
-
-def search(query):
-
-    query_embedding = model.encode([query])
-
-    _, I = index.search(np.array(query_embedding), k=1)
-
-    return documents[I[0][0]]
+def search(query, k=1):
+    """Search for the most relevant policy document based on cosine similarity."""
+    query_vector = vectorizer.transform([query])
+    similarities = cosine_similarity(query_vector, policy_vectors)[0]
+    top_indices = np.argsort(similarities)[-k:][::-1]
+    # Get indices of top-k most similar documents
+    I = np.argsort(similarities)[::-1][:k]
+    
+    return [POLICY_DOCUMENTS[i] for i in I]
