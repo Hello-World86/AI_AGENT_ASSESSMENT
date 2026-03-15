@@ -1,4 +1,4 @@
-# tools.py
+
 
 # Mock CRM order database
 orders = {
@@ -32,9 +32,11 @@ customer_profiles = {
 }
 
 
-def get_order_details(order_id: int):
-    return orders.get(order_id, {"error": "Order not found"})
+def get_order_details(order_id):
+    """Look up a specific order by order ID."""
+    return orders.get(int(order_id), {"error": "Order not found"})
 
 
 def get_customer_profile(customer_type: str):
+    """Fetch customer profile by tier (VIP or Standard)."""
     return customer_profiles.get(customer_type, {"error": "Customer type not found"})
